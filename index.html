@@ -297,17 +297,17 @@
   <div class="hero">
     <span class="eyebrow"><span class="dot"></span> Screenshot in, sticker out</span>
     <h1>Turn any screenshot into a <span>WhatsApp sticker</span></h1>
-    <p>Upload the screenshot of a TikTok sticker (or any image), and Immey lifts it off the background and packages it into a proper 512×512 WhatsApp‑ready sticker — right in your browser, nothing uploaded to a server.</p>
+    <p>Upload a screenshot for a static sticker, or a GIF to keep the motion — Immey lifts the subject off the background and packages it into a WhatsApp‑ready sticker, right in your browser, nothing uploaded to a server.</p>
   </div>
 
   <div class="sheet">
     <div class="step-label">Step 1 — Upload</div>
     <div class="dropzone" id="dropzone">
       <svg fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 0L7 9m5-5l5 5M4 16v3a2 2 0 002 2h12a2 2 0 002-2v-3"/></svg>
-      <div class="main">Tap to choose a screenshot</div>
-      <div class="sub">or drag one in · PNG / JPG, up to ~10MB</div>
+      <div class="main">Tap to choose a screenshot or GIF</div>
+      <div class="sub">or drag one in · PNG / JPG / GIF, up to ~10MB</div>
     </div>
-    <input type="file" id="fileInput" accept="image/*">
+    <input type="file" id="fileInput" accept="image/*,.gif">
 
     <div class="stage" id="stage" style="display:none;">
       <div class="panel">
@@ -329,7 +329,7 @@
 
     <div class="actions">
       <button class="btn btn-primary" id="makeBtn" disabled>✂️ Remove background &amp; make sticker</button>
-      <button class="btn btn-secondary" id="downloadBtn" style="display:none;">⬇️ Download sticker (.webp)</button>
+      <button class="btn btn-secondary" id="downloadBtn" style="display:none;">⬇️ Download sticker</button>
       <button class="btn btn-secondary" id="resetBtn" style="display:none;">↺ Start over</button>
     </div>
   </div>
@@ -337,17 +337,19 @@
   <div class="howto">
     <h2>Adding it to WhatsApp</h2>
     <ol>
-      <li>Download the sticker Immey makes for you — it's already sized and formatted (512×512 WebP) to WhatsApp's spec.</li>
-      <li>Open a chat in WhatsApp → tap the <strong>sticker icon</strong> → the <strong>+</strong> tray → <strong>Create</strong>, and pick the image from your gallery. WhatsApp will crop it into a sticker automatically.</li>
-      <li>Prefer a dedicated sticker pack? Import the downloaded file into an app like <strong>Sticker Maker</strong> or <strong>Sticker.ly</strong>, which adds an "Add to WhatsApp" button for you.</li>
+      <li id="howto-step1">Download the sticker Immey makes for you — it's already sized to WhatsApp's 512×512 spec.</li>
+      <li>Open a chat in WhatsApp → tap the <strong>sticker icon</strong> → the <strong>+</strong> tray → <strong>Create</strong>, and pick the file from your gallery.</li>
+      <li id="howto-step3">Prefer a dedicated sticker pack? Import the downloaded file into an app like <strong>Sticker Maker</strong> or <strong>Sticker.ly</strong>, which adds an "Add to WhatsApp" button for you.</li>
     </ol>
   </div>
 
   <footer>Made with 🏷️ by <b>Cymor</b> — Immey Sticker Maker</footer>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/gif.js@0.2.0/dist/gif.min.js"></script>
 <script type="module">
   import { removeBackground } from "https://esm.sh/@imgly/background-removal@1.7.0";
+  import { parseGIF, decompressFrames } from "https://esm.sh/gifuct-js@2.1.2";
 
   const dropzone = document.getElementById('dropzone');
   const fileInput = document.getElementById('fileInput');
@@ -364,6 +366,8 @@
 
   let currentFile = null;
   let resultBlobUrl = null;
+  let isAnimated = false;
+  let gifWorkerBlobUrl = null; // lazily created, same-origin blob URL for gif.js's worker
 
   function showError(msg){
     errorBox.textContent = msg;
@@ -396,21 +400,32 @@
   });
 
   function handleFile(file){
-    if (!file.type.startsWith('image/')){
-      showError('That file doesn\'t look like an image — please choose a PNG or JPG screenshot.');
+    const looksLikeGif = file.type === 'image/gif' || /\.gif$/i.test(file.name);
+    if (!file.type.startsWith('image/') && !looksLikeGif){
+      showError('That file doesn\'t look like an image — please choose a PNG, JPG, or GIF.');
       return;
     }
     clearError();
     currentFile = file;
+    isAnimated = looksLikeGif;
     resultBlobUrl = null;
 
     const url = URL.createObjectURL(file);
-    origFrame.innerHTML = `<img src="${url}" alt="Original screenshot">`;
+    origFrame.innerHTML = `<img src="${url}" alt="Original ${isAnimated ? 'GIF' : 'screenshot'}">`;
     resultFrame.classList.remove('ready');
     resultFrame.innerHTML = `<span class="placeholder-text">Not made yet</span>`;
 
+    // Swap the how-to copy depending on whether we're producing a static or animated sticker
+    document.getElementById('howto-step1').textContent = isAnimated
+      ? "Download the animated sticker Immey makes for you — it's cropped to a 512×512 square, same as WhatsApp's spec."
+      : "Download the sticker Immey makes for you — it's already sized to WhatsApp's 512×512 spec.";
+    document.getElementById('howto-step3').innerHTML = isAnimated
+      ? 'This comes out as an animated GIF. Import it into an app like <strong>Sticker Maker</strong> or <strong>Sticker.ly</strong> — they convert it to WhatsApp\'s animated sticker format and add the "Add to WhatsApp" button for you.'
+      : 'Prefer a dedicated sticker pack? Import the downloaded file into an app like <strong>Sticker Maker</strong> or <strong>Sticker.ly</strong>, which adds an "Add to WhatsApp" button for you.';
+
     stage.style.display = 'grid';
     makeBtn.disabled = false;
+    makeBtn.textContent = isAnimated ? '✂️ Remove background & make animated sticker' : '✂️ Remove background & make sticker';
     downloadBtn.style.display = 'none';
     resetBtn.style.display = 'inline-flex';
   }
@@ -419,23 +434,35 @@
     if (!currentFile) return;
     clearError();
     makeBtn.disabled = true;
-    setProgress(2, 'Loading background‑removal model…');
 
     try {
-      const resultPngBlob = await removeBackground(currentFile, {
-        progress: (key, current, total) => {
-          const pct = total ? Math.min(95, Math.round((current / total) * 90) + 5) : 50;
-          setProgress(pct, key.includes('fetch') ? 'Downloading model…' : 'Removing background…');
-        }
-      });
+      let outputBlob, downloadName, altText;
 
-      setProgress(96, 'Cropping and packaging sticker…');
-      const stickerBlob = await buildStickerFromPng(resultPngBlob);
+      if (isAnimated){
+        setProgress(1, 'Reading GIF frames…');
+        outputBlob = await buildAnimatedSticker(currentFile);
+        downloadName = 'immey-sticker.gif';
+        altText = 'Generated animated sticker';
+      } else {
+        setProgress(2, 'Loading background‑removal model…');
+        const resultPngBlob = await removeBackground(currentFile, {
+          model: 'isnet_quint8', // smaller, quantized model — much more reliable on mobile devices
+          output: { format: 'image/png', quality: 0.9 },
+          progress: (key, current, total) => {
+            const pct = total ? Math.min(95, Math.round((current / total) * 90) + 5) : 50;
+            setProgress(pct, key.includes('fetch') ? 'Downloading model…' : 'Removing background…');
+          }
+        });
+        setProgress(96, 'Cropping and packaging sticker…');
+        outputBlob = await buildStickerFromPng(resultPngBlob);
+        downloadName = 'immey-sticker.webp';
+        altText = 'Generated sticker';
+      }
 
       if (resultBlobUrl) URL.revokeObjectURL(resultBlobUrl);
-      resultBlobUrl = URL.createObjectURL(stickerBlob);
+      resultBlobUrl = URL.createObjectURL(outputBlob);
 
-      resultFrame.innerHTML = `<img src="${resultBlobUrl}" alt="Generated sticker">`;
+      resultFrame.innerHTML = `<img src="${resultBlobUrl}" alt="${altText}">`;
       resultFrame.classList.add('ready');
 
       setProgress(100, 'Done!');
@@ -445,7 +472,7 @@
       downloadBtn.onclick = () => {
         const a = document.createElement('a');
         a.href = resultBlobUrl;
-        a.download = 'immey-sticker.webp';
+        a.download = downloadName;
         document.body.appendChild(a);
         a.click();
         a.remove();
@@ -453,7 +480,8 @@
     } catch (err) {
       console.error(err);
       hideProgress();
-      showError('Something went wrong removing the background. This can happen on very large images or slow connections — try a smaller screenshot or try again.');
+      const detail = (err && err.message) ? err.message : String(err);
+      showError('Something went wrong: ' + detail + ' — if this keeps happening, try a smaller file, a different browser, or Wi‑Fi instead of mobile data (the model has to download on first use).');
     } finally {
       makeBtn.disabled = false;
     }
@@ -461,6 +489,7 @@
 
   resetBtn.addEventListener('click', () => {
     currentFile = null;
+    isAnimated = false;
     if (resultBlobUrl) URL.revokeObjectURL(resultBlobUrl);
     resultBlobUrl = null;
     stage.style.display = 'none';
@@ -537,6 +566,157 @@
       img.onload = () => resolve(img);
       img.onerror = reject;
       img.src = URL.createObjectURL(blob);
+    });
+  }
+
+  // Lazily fetches gif.js's worker script and turns it into a same-origin blob URL,
+  // since browsers require Web Workers to be loaded from the same origin as the page.
+  async function getGifWorkerUrl(){
+    if (gifWorkerBlobUrl) return gifWorkerBlobUrl;
+    const res = await fetch('https://cdn.jsdelivr.net/npm/gif.js@0.2.0/dist/gif.worker.js');
+    if (!res.ok) throw new Error('Could not load the GIF encoder worker script.');
+    const blob = await res.blob();
+    gifWorkerBlobUrl = URL.createObjectURL(blob);
+    return gifWorkerBlobUrl;
+  }
+
+  // Decodes every frame of the source GIF, composites each one into a full-size
+  // frame (following GIF disposal rules), removes the background from each frame,
+  // finds one consistent crop box across the whole animation, then re-encodes
+  // everything as a new transparent, cropped, 512x512 animated GIF.
+  async function buildAnimatedSticker(file){
+    const buffer = await file.arrayBuffer();
+    const gif = parseGIF(buffer);
+    const frames = decompressFrames(gif, true);
+    if (!frames.length) throw new Error('Could not read any frames from this GIF.');
+
+    const screenW = gif.lsd.width;
+    const screenH = gif.lsd.height;
+
+    // Step 1: composite each GIF frame into a full-size canvas per disposal rules
+    const fullCanvas = document.createElement('canvas');
+    fullCanvas.width = screenW;
+    fullCanvas.height = screenH;
+    const fullCtx = fullCanvas.getContext('2d');
+
+    const patchCanvas = document.createElement('canvas');
+    const patchCtx = patchCanvas.getContext('2d');
+
+    const composited = []; // { canvas, delay }
+    for (const frame of frames){
+      patchCanvas.width = frame.dims.width;
+      patchCanvas.height = frame.dims.height;
+      const patchImageData = patchCtx.createImageData(frame.dims.width, frame.dims.height);
+      patchImageData.data.set(frame.patch);
+      patchCtx.putImageData(patchImageData, 0, 0);
+
+      fullCtx.drawImage(patchCanvas, frame.dims.left, frame.dims.top);
+
+      const snapshot = document.createElement('canvas');
+      snapshot.width = screenW;
+      snapshot.height = screenH;
+      snapshot.getContext('2d').drawImage(fullCanvas, 0, 0);
+      composited.push({ canvas: snapshot, delay: Math.max(20, frame.delay || 100) });
+
+      if (frame.disposalType === 2){
+        fullCtx.clearRect(frame.dims.left, frame.dims.top, frame.dims.width, frame.dims.height);
+      }
+    }
+
+    // Step 2: remove the background from each composited frame
+    const removedFrames = [];
+    for (let i = 0; i < composited.length; i++){
+      setProgress(
+        5 + Math.round((i / composited.length) * 70),
+        `Removing background from frame ${i + 1} of ${composited.length}…`
+      );
+      const frameBlob = await new Promise(resolve => composited[i].canvas.toBlob(resolve, 'image/png'));
+      const cutout = await removeBackground(frameBlob, {
+        model: 'isnet_quint8',
+        output: { format: 'image/png', quality: 0.9 }
+      });
+      const img = await blobToImage(cutout);
+      removedFrames.push({ img, delay: composited[i].delay });
+    }
+
+    // Step 3: find one shared crop box across every frame, so the subject
+    // doesn't jump around as the crop resets each frame
+    setProgress(78, 'Lining up frames…');
+    let minX = screenW, minY = screenH, maxX = 0, maxY = 0;
+    const ALPHA_THRESHOLD = 10;
+    const tmpCanvas = document.createElement('canvas');
+    tmpCanvas.width = screenW;
+    tmpCanvas.height = screenH;
+    const tmpCtx = tmpCanvas.getContext('2d');
+
+    for (const { img } of removedFrames){
+      tmpCtx.clearRect(0, 0, screenW, screenH);
+      tmpCtx.drawImage(img, 0, 0);
+      const { data } = tmpCtx.getImageData(0, 0, screenW, screenH);
+      for (let y = 0; y < screenH; y++){
+        for (let x = 0; x < screenW; x++){
+          if (data[(y * screenW + x) * 4 + 3] > ALPHA_THRESHOLD){
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
+          }
+        }
+      }
+    }
+    if (maxX <= minX || maxY <= minY){ minX = 0; minY = 0; maxX = screenW; maxY = screenH; }
+
+    const cropW = maxX - minX;
+    const cropH = maxY - minY;
+    const size = Math.max(cropW, cropH);
+    const finalSize = 512;
+    const scale = (finalSize - finalSize * 0.08) / size;
+    const drawW = cropW * scale;
+    const drawH = cropH * scale;
+    const dx = (finalSize - drawW) / 2;
+    const dy = (finalSize - drawH) / 2;
+
+    // Step 4: re-render each frame onto a 512x512 canvas, keying transparent
+    // pixels to a chroma color (GIF only supports on/off transparency, not soft alpha)
+    setProgress(85, 'Building the animated sticker…');
+    const CHROMA = 0x00FF00;
+    const workerScript = await getGifWorkerUrl();
+    const encoder = new GIF({
+      workers: 2,
+      quality: 8,
+      width: finalSize,
+      height: finalSize,
+      workerScript,
+      transparent: CHROMA,
+      background: '#00FF00',
+      repeat: 0
+    });
+
+    const outCanvas = document.createElement('canvas');
+    outCanvas.width = finalSize;
+    outCanvas.height = finalSize;
+    const outCtx = outCanvas.getContext('2d');
+
+    for (const { img, delay } of removedFrames){
+      outCtx.fillStyle = '#00FF00';
+      outCtx.fillRect(0, 0, finalSize, finalSize);
+      outCtx.drawImage(img, minX, minY, cropW, cropH, dx, dy, drawW, drawH);
+
+      // Binarize alpha so gif.js's chroma-key transparency has a clean edge to key against
+      const frameData = outCtx.getImageData(0, 0, finalSize, finalSize);
+      const d = frameData.data;
+      for (let p = 0; p < d.length; p += 4){
+        if (d[p + 3] < 200){ d[p] = 0; d[p + 1] = 255; d[p + 2] = 0; d[p + 3] = 255; }
+      }
+      outCtx.putImageData(frameData, 0, 0);
+
+      encoder.addFrame(outCtx, { copy: true, delay });
+    }
+
+    return await new Promise((resolve, reject) => {
+      encoder.on('finished', blob => resolve(blob));
+      encoder.on('abort', () => reject(new Error('GIF encoding was aborted.')));
+      encoder.render();
     });
   }
 </script>
