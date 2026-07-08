@@ -1,4 +1,0 @@
-User-agent: *
-Allow: /
-
-Sitemap: https://cymor-rumion-q1z64t.vercel.app/sitemap.xml
